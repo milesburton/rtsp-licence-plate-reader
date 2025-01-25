@@ -1,12 +1,12 @@
-# 🎥 RTSP License Plate Reader
+# 🎥 RTSP Licence Plate Reader
 
-A real-time license plate detection system that processes RTSP video streams to identify vehicles and their license plates. This application was developed with assistance from Anthropic's Claude AI.
+A real-time licence plate detection system that processes RTSP video streams to identify vehicles and their licence plates. This application was developed with assistance from Anthropic's Claude AI.
 
 ## ✨ Features
 
 - Real-time RTSP stream processing
-- GPU-accelerated vehicle and person detection
-- License plate OCR with confidence scoring
+- Vehicle and person detection
+- Licence plate OCR with confidence scoring
 - Support for UK, US, and EU plate formats
 - Person detection with visual tracking
 - Debug mode with visual output
@@ -38,7 +38,6 @@ FPS=5
 FRAME_WIDTH=1280
 FRAME_HEIGHT=720
 DEBUG_MODE=true
-USE_GPU=true
 MIN_VEHICLE_AREA=10000
 MAX_VEHICLE_AREA=80000
 ```
@@ -52,7 +51,7 @@ bun run index.ts
 ## 📤 Output
 
 The application generates:
-- Real-time console logs of detected vehicles, people, and license plates
+- Real-time console logs of detected vehicles, people, and licence plates
 - Debug images of detected objects (when DEBUG_MODE=true)
 - Confidence scores for vehicle, person, and plate detection
 
@@ -64,4 +63,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - Developed with assistance from Anthropic's Claude AI
 - Uses Tesseract.js for OCR
-- Uses TensorFlow.js for GPU-accelerated processing
+- Uses TensorFlow.js for object detection
