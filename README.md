@@ -16,7 +16,13 @@ A real-time licence plate detection system that processes RTSP video streams to 
 
 - [Bun](https://bun.sh/) runtime v1.2.0+
 - FFmpeg
-- Node.js build tools (for TensorFlow.js)
+  - Linux/WSL2: `sudo apt update && sudo apt install ffmpeg`
+  - macOS: `brew install ffmpeg`
+  - Windows: [FFmpeg Downloads](https://ffmpeg.org/download.html)
+- Build essentials (for TensorFlow.js native modules)
+  - Linux/WSL2: `sudo apt install build-essential pkg-config`
+  - macOS: `xcode-select --install`
+  - Windows: Visual Studio Build Tools
 
 ## 🚀 Installation
 
