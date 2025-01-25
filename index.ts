@@ -3,17 +3,16 @@ import ffmpeg from 'fluent-ffmpeg';
 import * as fs from 'fs';
 import * as path from 'path';
 import winston from 'winston';
-import chalk from 'chalk'; // For colorizing console output
+import chalk from 'chalk';
 import sharp from 'sharp';
 import { createWorker, Worker } from 'tesseract.js';
 import * as tf from '@tensorflow/tfjs-node';
 
-// Custom logging format with context-specific emojis and colors
+// Custom logging format
 const customFormat = winston.format.printf(({ level, message, timestamp }) => {
     let emoji = '';
     let color = chalk.white;
 
-    // Map log levels to emojis and colors
     switch (level) {
         case 'info':
             emoji = 'ℹ️';
@@ -36,132 +35,103 @@ const customFormat = winston.format.printf(({ level, message, timestamp }) => {
             break;
     }
 
-    // Format the log message
     return `${color(`${emoji} [${timestamp}] ${level.toUpperCase()}:`)} ${message}`;
 });
 
 function sanitizeFFmpegCommand(cmd: string): string {
-    // Regex to match the RTSP URL with credentials
     const rtspUrlRegex = /(-i\s+)(rtsp:\/\/[^@]+@[^\s]+)/;
-
-    // Replace the credentials with "*****"
     const sanitizedCmd = cmd.replace(rtspUrlRegex, (match, p1, p2) => {
         const url = new URL(p2);
         return `${p1}rtsp://*****:*****@${url.hostname}${url.pathname}`;
     });
-
     return sanitizedCmd;
 }
 
-// Configure the logger with the custom format
 const logger = winston.createLogger({
     level: 'info',
     format: winston.format.combine(
-        winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }), // Add timestamp
-        winston.format.errors({ stack: true }), // Include error stacks
-        customFormat // Use the custom format
+        winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+        winston.format.errors({ stack: true }),
+        customFormat
     ),
     transports: [
-        new winston.transports.Console(), // Log to console
-        new winston.transports.File({ filename: 'error.log', level: 'error' }), // Log errors to a file
-        new winston.transports.File({ filename: 'app.log' }) // Log everything to a file
+        new winston.transports.Console(),
+        new winston.transports.File({ filename: 'error.log', level: 'error' }),
+        new winston.transports.File({ filename: 'app.log' })
     ],
 });
 
-// Context-specific emojis
 const EMOJIS = {
-    INIT: '🚀', // System initialisation
-    DIR_CHECK: '📂', // Directory checks
-    RTSP_CONNECT: '📡', // RTSP connection attempts
-    FFMPEG: '🎥', // FFmpeg commands
-    FRAME_WRITE: '🖼️', // Writing frames
-    FRAME_PROCESS: '🔍', // Processing frames
-    PEOPLE_DETECT: '👤', // Detecting people
-    VEHICLE_DETECT: '🚗', // Detecting vehicles
-    PLATE_DETECT: '🚘', // Detecting licence plates
-    NO_PLATE: '🚫', // No licence plates detected
+    INIT: '🚀',
+    DIR_CHECK: '📂',
+    RTSP_CONNECT: '📡',
+    FFMPEG: '🎥',
+    FRAME_WRITE: '🖼️',
+    FRAME_PROCESS: '🔍',
+    PEOPLE_DETECT: '👤',
+    VEHICLE_DETECT: '🚗',
+    PLATE_DETECT: '🚘',
+    NO_PLATE: '🚫',
+    DEBUG: '🐞',
 };
 
+// Validate environment variables and set defaults with detailed logging
+function validateConfig() {
+    const requiredVars = ['RTSP_URL'];
+    const missingVars = requiredVars.filter(varName => !env[varName]);
+    
+    if (missingVars.length > 0) {
+        logger.error(`${EMOJIS.NO_PLATE} Missing required environment variables: ${missingVars.join(', ')}`);
+        process.exit(1);
+    }
+
+    const numericVars = ['FPS', 'FRAME_WIDTH', 'FRAME_HEIGHT', 'MAX_RETRIES', 'RETRY_DELAY',
+                        'MIN_VEHICLE_AREA', 'MAX_VEHICLE_AREA', 'MIN_PERSON_AREA', 'MAX_PERSON_AREA'];
+    
+    numericVars.forEach(varName => {
+        const value = env[varName];
+        if (value && isNaN(Number(value))) {
+            logger.error(`${EMOJIS.NO_PLATE} Invalid numeric value for ${varName}: ${value}`);
+            process.exit(1);
+        }
+    });
+}
+
+validateConfig();
+
 const CONFIG = {
-    RTSP_URL: env.RTSP_URL, // RTSP stream URL (excluded from logs for security)
-    FPS: parseInt(env.FPS || '15'), // Default to 15 FPS if not set
-    FRAME_WIDTH: parseInt(env.FRAME_WIDTH || '1920'), // Default to 1920 if not set
-    FRAME_HEIGHT: parseInt(env.FRAME_HEIGHT || '1080'), // Default to 1080 if not set
-    MAX_RETRIES: parseInt(env.MAX_RETRIES || '3'), // Default to 3 retries if not set
-    RETRY_DELAY: parseInt(env.RETRY_DELAY || '5000'), // Default to 5000 ms if not set
-    DEBUG_MODE: env.DEBUG_MODE === 'true', // Convert to boolean
-    MIN_VEHICLE_AREA: parseInt(env.MIN_VEHICLE_AREA || '5000'), // Default to 5000 if not set
-    MAX_VEHICLE_AREA: parseInt(env.MAX_VEHICLE_AREA || '120000'), // Default to 120000 if not set
-    MIN_PERSON_AREA: parseInt(env.MIN_PERSON_AREA || '5000'), // Default to 5000 if not set
-    MAX_PERSON_AREA: parseInt(env.MAX_PERSON_AREA || '50000'), // Default to 50000 if not set
+    RTSP_URL: env.RTSP_URL,
+    FPS: parseInt(env.FPS || '15'),
+    FRAME_WIDTH: parseInt(env.FRAME_WIDTH || '1920'),
+    FRAME_HEIGHT: parseInt(env.FRAME_HEIGHT || '1080'),
+    MAX_RETRIES: parseInt(env.MAX_RETRIES || '3'),
+    RETRY_DELAY: parseInt(env.RETRY_DELAY || '5000'),
+    DEBUG_MODE: env.DEBUG_MODE === 'true',
+    MIN_VEHICLE_AREA: parseInt(env.MIN_VEHICLE_AREA || '5000'),
+    MAX_VEHICLE_AREA: parseInt(env.MAX_VEHICLE_AREA || '120000'),
+    MIN_PERSON_AREA: parseInt(env.MIN_PERSON_AREA || '5000'),
+    MAX_PERSON_AREA: parseInt(env.MAX_PERSON_AREA || '50000'),
     PLATE_PATTERNS: {
         UK: /^[A-Z]{2}[0-9]{2}[A-Z]{3}$/,
         US: /^[A-Z0-9]{5,8}$/,
         EU: /^[A-Z]{1,2}[0-9]{1,4}[A-Z]{1,2}$/
-    }
+    },
+    FRAME_QUEUE_SIZE: parseInt(env.FRAME_QUEUE_SIZE || '30'),
 };
 
-if (!CONFIG.RTSP_URL) {
-    logger.error(`${EMOJIS.NO_PLATE} RTSP_URL environment variable is not set.`);
-    process.exit(1);
+let isShuttingDown = false;
+
+// Utility function to measure processing time
+function measureTime(label: string, startTime: number) {
+    const endTime = process.hrtime.bigint();
+    const duration = Number(endTime - BigInt(startTime)) / 1e6;
+    logger.debug(`${EMOJIS.DEBUG} ${label} took ${duration.toFixed(2)}ms`);
 }
 
-class FrameQueue {
-    private queue: string[] = [];
-    private processing = false;
-    private maxSize: number;
-
-    constructor(maxSize = 10) {
-        this.maxSize = maxSize;
-    }
-
-    async enqueue(framePath: string) {
-        if (this.queue.length >= this.maxSize) {
-            const oldFrame = this.queue.shift();
-            if (oldFrame && fs.existsSync(oldFrame)) {
-                await fs.promises.unlink(oldFrame);
-            }
-        }
-        this.queue.push(framePath);
-        if (!this.processing) {
-            this.processQueue();
-        }
-    }
-
-    private async processQueue() {
-        if (this.queue.length === 0) {
-            this.processing = false;
-            return;
-        }
-
-        this.processing = true;
-        const framePath = this.queue.shift()!;
-
-        try {
-            await processFrame(framePath);
-            if (fs.existsSync(framePath)) {
-                await fs.promises.unlink(framePath);
-            }
-        } catch (error) {
-            logger.error(`${EMOJIS.NO_PLATE} Error processing frame:`, error);
-        }
-
-        setImmediate(() => this.processQueue());
-    }
-}
-
-const frameQueue: FrameQueue = new FrameQueue();
-const TEMP_DIR = './debug_output';
-let worker: Worker | null = null;
-
-async function initialise() {
-    if (!fs.existsSync(TEMP_DIR)) {
-        fs.mkdirSync(TEMP_DIR, { recursive: true });
-    }
-    worker = await createWorker('eng');
-    logger.info(`${EMOJIS.INIT} System initialised with OCR capabilities.`);
-}
-
+/**
+ * Represents a detected region in the image
+ * @interface Region
+ */
 interface Region {
     x: number;
     y: number;
@@ -177,7 +147,71 @@ interface DetectionConfig {
     maxAspectRatio: number;
 }
 
+interface OCRWord {
+    text: string;
+    confidence: number;
+}
+
+class FrameQueue {
+    private queue: Buffer[] = [];
+    private processing = false;
+    private maxSize: number;
+
+    constructor(maxSize = 10) {
+        this.maxSize = maxSize;
+    }
+
+    async enqueue(buffer: Buffer) {
+        if (isShuttingDown) return;
+
+        if (this.queue.length >= this.maxSize) {
+            logger.warn(`${EMOJIS.FRAME_WRITE} Queue is full (size: ${this.queue.length}). Discarding oldest frame.`);
+            this.queue.shift();
+        }
+        this.queue.push(buffer);
+        if (!this.processing) {
+            this.processQueue();
+        }
+    }
+
+    private async processQueue() {
+        if (this.queue.length === 0 || isShuttingDown) {
+            this.processing = false;
+            return;
+        }
+
+        this.processing = true;
+        const buffer = this.queue.shift()!;
+
+        try {
+            await processFrame(buffer);
+        } catch (error) {
+            logger.error(`${EMOJIS.NO_PLATE} Error processing frame:`, error);
+            if (error instanceof Error) {
+                logger.error(`${EMOJIS.NO_PLATE} Stack trace:`, error.stack);
+            }
+        }
+
+        setImmediate(() => this.processQueue());
+    }
+}
+
+const frameQueue: FrameQueue = new FrameQueue(CONFIG.FRAME_QUEUE_SIZE);
+const TEMP_DIR = './debug_output';
+let worker: Worker | null = null;
+
+async function initialise() {
+    if (!fs.existsSync(TEMP_DIR)) {
+        fs.mkdirSync(TEMP_DIR, { recursive: true });
+    }
+    await tf.ready();
+    logger.info(`${EMOJIS.INIT} TensorFlow initialized`);
+    worker = await createWorker('eng');
+    logger.info(`${EMOJIS.INIT} System initialised with OCR capabilities.`);
+}
+
 async function detectPeople(imagePath: string): Promise<Region[]> {
+    const startTime = process.hrtime.bigint();
     try {
         const { data, info } = await sharp(imagePath)
             .grayscale()
@@ -186,6 +220,7 @@ async function detectPeople(imagePath: string): Promise<Region[]> {
             .raw()
             .toBuffer({ resolveWithObject: true });
 
+        logger.debug(`${EMOJIS.DEBUG} Image preprocessing completed for person detection`);
         const regions = findRegions(data, info.width, info.height, {
             minArea: CONFIG.MIN_PERSON_AREA,
             maxArea: CONFIG.MAX_PERSON_AREA,
@@ -212,24 +247,33 @@ async function detectPeople(imagePath: string): Promise<Region[]> {
                     left: 0
                 }])
                 .toFile(path.join(TEMP_DIR, `detected_people_${Date.now()}.jpg`));
+            
+            logger.debug(`${EMOJIS.DEBUG} Debug visualization saved for person detection`);
         }
 
+        measureTime('Person detection', Number(startTime));
         return regions;
     } catch (error) {
         logger.error(`${EMOJIS.NO_PLATE} Error in person detection:`, error);
+        if (error instanceof Error) {
+            logger.error(`${EMOJIS.NO_PLATE} Stack trace:`, error.stack);
+        }
+        logger.debug(`${EMOJIS.DEBUG} Image path: ${imagePath}`);
         return [];
     }
 }
 
 async function detectVehicles(imagePath: string): Promise<Region[]> {
+    const startTime = process.hrtime.bigint();
     try {
         const { data, info } = await sharp(imagePath)
             .grayscale()
-            .blur(1.0) // Reduced blur radius
-            .threshold(100) // Adjusted threshold
+            .blur(1.0)
+            .threshold(100)
             .raw()
             .toBuffer({ resolveWithObject: true });
-
+        
+        logger.debug(`${EMOJIS.DEBUG} Image preprocessing completed for vehicle detection`);
         const regions = findRegions(data, info.width, info.height, {
             minArea: CONFIG.MIN_VEHICLE_AREA,
             maxArea: CONFIG.MAX_VEHICLE_AREA,
@@ -237,7 +281,7 @@ async function detectVehicles(imagePath: string): Promise<Region[]> {
             maxAspectRatio: 2.5
         });
 
-        if (CONFIG.DEBUG_MODE) {
+        if (CONFIG.DEBUG_MODE && regions.length > 0) {
             const original = sharp(imagePath);
             const svgBuffer = Buffer.from(`
                 <svg width="${info.width}" height="${info.height}">
@@ -256,11 +300,19 @@ async function detectVehicles(imagePath: string): Promise<Region[]> {
                     left: 0
                 }])
                 .toFile(path.join(TEMP_DIR, `detected_vehicles_${Date.now()}.jpg`));
+            
+            logger.debug(`${EMOJIS.DEBUG} Debug visualization saved for vehicle detection`);
         }
 
+        measureTime('Vehicle detection', Number(startTime));
         return regions;
     } catch (error) {
         logger.error(`${EMOJIS.NO_PLATE} Error in vehicle detection:`, error);
+        if (error instanceof Error) {
+            logger.error(`${EMOJIS.NO_PLATE} Stack trace:`, error.stack);
+            logger.debug(`${EMOJIS.DEBUG} Error details: ${JSON.stringify(error)}`);
+        }
+        logger.debug(`${EMOJIS.DEBUG} Image path: ${imagePath}`);
         return [];
     }
 }
@@ -283,8 +335,7 @@ function findRegions(data: Buffer, width: number, height: number, config: Detect
                     area <= config.maxArea &&
                     aspectRatio >= config.minAspectRatio && 
                     aspectRatio <= config.maxAspectRatio) {
-                    // Calculate confidence as a percentage of the maximum area
-                    bounds.confidence = (area / config.maxArea) * 100; 
+                    bounds.confidence = (area / config.maxArea) * 100;
                     regions.push(bounds);
                 }
             }
@@ -356,55 +407,76 @@ function getBoundingBox(region: Set<number>, width: number): Region {
         maxY = Math.max(maxY, y);
     }
 
-    const widthBox = maxX - minX;
-    const heightBox = maxY - minY;
-    const area = widthBox * heightBox;
-
     return {
         x: minX,
         y: minY,
-        width: widthBox,
-        height: heightBox,
-        confidence: 0 // Placeholder, will be updated in findRegions
+        width: maxX - minX,
+        height: maxY - minY,
+        confidence: 0
     };
 }
 
-interface OCRWord {
-    text: string;
-    confidence: number;
-}
-
 async function performOCR(imagePath: string): Promise<OCRWord[]> {
+    const startTime = process.hrtime.bigint();
     try {
         const { data } = await worker.recognize(imagePath);
+        logger.debug(`${EMOJIS.DEBUG} OCR processing completed`);
         
-        // Map words to a strictly typed array
-        const words: OCRWord[] = data.words.map((word: { text: string; confidence: number }) => ({
-            text: word.text,
-            confidence: word.confidence
-        })).filter((word: OCRWord) => {
-            return Object.values(CONFIG.PLATE_PATTERNS).some(pattern => 
-                pattern.test(word.text.toUpperCase())
-            );
-        });
+        const words: OCRWord[] = data.words
+            .map((word: { text: string; confidence: number }) => ({
+                text: word.text.toUpperCase().replace(/[^A-Z0-9]/g, ''),
+                confidence: word.confidence
+            }))
+            .filter((word: OCRWord) => {
+                if (word.text.length < 5 || word.text.length > 8) {
+                    logger.debug(`${EMOJIS.DEBUG} Filtered out plate due to length: ${word.text}`);
+                    return false;
+                }
+                
+                const matchesPattern = Object.values(CONFIG.PLATE_PATTERNS).some(pattern => pattern.test(word.text));
+                if (!matchesPattern) {
+                    logger.debug(`${EMOJIS.DEBUG} Filtered out non-matching plate format: ${word.text}`);
+                }
+                return matchesPattern;
+            })
+            .filter((word: OCRWord) => word.confidence > 0.6);
+
+        measureTime('OCR processing', Number(startTime));
+        
+        if (words.length > 0) {
+            logger.info(`${EMOJIS.PLATE_DETECT} Found ${words.length} potential license plates`);
+            words.forEach(word => {
+                logger.debug(`${EMOJIS.DEBUG} Plate candidate: ${word.text} (${(word.confidence * 100).toFixed(1)}% confidence)`);
+            });
+        }
         
         return words;
     } catch (error) {
         logger.error(`${EMOJIS.NO_PLATE} Error performing OCR:`, error);
+        if (error instanceof Error) {
+            logger.error(`${EMOJIS.NO_PLATE} Stack trace:`, error.stack);
+            logger.debug(`${EMOJIS.DEBUG} Error details: ${JSON.stringify(error)}`);
+        }
+        logger.debug(`${EMOJIS.DEBUG} Image path: ${imagePath}`);
+        await worker.terminate();
+        worker = await createWorker('eng');
         return [];
     }
 }
 
-async function processFrame(framePath: string) {
+async function processFrame(buffer: Buffer) {
     try {
-        logger.info(`${EMOJIS.FRAME_PROCESS} Processing frame: ${framePath}`);
-        if (!fs.existsSync(framePath)) {
-            logger.error(`${EMOJIS.NO_PLATE} Frame file does not exist`);
-            return;
-        }
+        logger.info(`${EMOJIS.FRAME_PROCESS} Processing frame (Queue size: ${frameQueue.queue.length})`);
+
+        const tensor = tf.node.decodeImage(buffer);
+        logger.info(`${EMOJIS.DEBUG} Created tensor with shape: ${tensor.shape} and dtype: ${tensor.dtype}`);
+
+        // Write buffer to temp file for Sharp processing
+        const tempFramePath = path.join(TEMP_DIR, `frame_${Date.now()}.jpg`);
+        await fs.promises.writeFile(tempFramePath, buffer);
 
         // Detect people
-        const people = await detectPeople(framePath);
+        const people = await detectPeople(tempFramePath);
         if (people.length > 0) {
             const peopleConfidences = people
                 .map(p => `👤 Person at (${p.x}, ${p.y}): ${p.confidence.toFixed(1)}% confidence`)
@@ -412,64 +484,50 @@ async function processFrame(framePath: string) {
             logger.info(`${EMOJIS.PEOPLE_DETECT} Detected ${people.length} people in frame:\n${peopleConfidences}`);
         }
 
-        // Process vehicles and plates
-        const imageBuffer = await fs.promises.readFile(framePath);
-        const tensor = tf.node.decodeImage(imageBuffer);
-        
-        const vehicles = await detectVehicles(framePath);
-        if (vehicles.length === 0) {
-            // No vehicles detected: 100% confidence
-            logger.info(`${EMOJIS.VEHICLE_DETECT} Detected 0 vehicles in frame with 100% confidence`);
-        } else {
-            // Vehicles detected: log confidences
+        // Detect vehicles and process potential plates
+        const vehicles = await detectVehicles(tempFramePath);
+        if (vehicles.length > 0) {
             const vehicleConfidences = vehicles
                 .map(v => `🚗 Vehicle at (${v.x}, ${v.y}): ${v.confidence.toFixed(1)}% confidence`)
                 .join('\n');
             logger.info(`${EMOJIS.VEHICLE_DETECT} Detected ${vehicles.length} vehicles in frame:\n${vehicleConfidences}`);
-        }
-        
-        if (vehicles.length === 0 && people.length === 0) {
-            logger.info(`${EMOJIS.NO_PLATE} No objects detected in this frame`);
-            tensor.dispose();
-            return;
-        }
-        
-        let plateDetected = false;
-        for (const vehicle of vehicles) {
-            try {
-                let vehicleTensor = tf.slice(tensor, [vehicle.y, vehicle.x, 0], [vehicle.height, vehicle.width, 3]);
 
-                // Ensure the tensor is 3D (height, width, channels)
-                vehicleTensor = vehicleTensor.squeeze(); // Remove extra dimensions (e.g., batch dimension)
+            // Process each vehicle for license plates
+            for (const vehicle of vehicles) {
+                try {
+                    const vehicleTensor = tf.slice(tensor, [vehicle.y, vehicle.x, 0], [vehicle.height, vehicle.width, 3]);
+                    const vehicleBuffer = await tf.node.encodePng(vehicleTensor as tf.Tensor3D);
+                    const vehiclePath = path.join(TEMP_DIR, `vehicle_${Date.now()}.jpg`);
+                    await fs.promises.writeFile(vehiclePath, vehicleBuffer);
 
-                // Cast to Tensor3D to satisfy TypeScript
-                const vehicleBuffer = await tf.node.encodePng(vehicleTensor as tf.Tensor3D);
-                const vehiclePath = path.join(TEMP_DIR, `vehicle_${Date.now()}.jpg`);
-                await fs.promises.writeFile(vehiclePath, vehicleBuffer);
-                
-                const plates = await performOCR(vehiclePath);
-                if (plates.length > 0) {
-                    const plateConfidences = plates
-                        .map(p => `🚘 Detected plate: ${p.text} (${(p.confidence * 100).toFixed(1)}% confidence)`)
-                        .join('\n');
-                    logger.info(`${EMOJIS.PLATE_DETECT} Detected licence plates:\n${plateConfidences}`);
-                    plateDetected = true;
+                    const plates = await performOCR(vehiclePath);
+                    if (plates.length > 0) {
+                        const plateConfidences = plates
+                            .map(p => `🚘 Detected plate: ${p.text} (${(p.confidence * 100).toFixed(1)}% confidence)`)
+                            .join('\n');
+                        logger.info(`${EMOJIS.PLATE_DETECT} Detected license plates:\n${plateConfidences}`);
+                    }
+
+                    await fs.promises.unlink(vehiclePath);
+                    vehicleTensor.dispose();
+                } catch (error) {
+                    logger.error(`${EMOJIS.NO_PLATE} Error processing vehicle region:`, error);
+                    if (error instanceof Error) {
+                        logger.error(`${EMOJIS.NO_PLATE} Stack trace:`, error.stack);
+                    }
                 }
-                
-                await fs.promises.unlink(vehiclePath);
-                vehicleTensor.dispose();
-            } catch (error) {
-                logger.error(`${EMOJIS.NO_PLATE} Error processing vehicle region:`, error);
             }
         }
-        
-        if (!plateDetected && vehicles.length > 0) {
-            logger.info(`${EMOJIS.NO_PLATE} No licence plates detected in any vehicle regions`);
-        }
-        
+
+        // Clean up
+        await fs.promises.unlink(tempFramePath);
         tensor.dispose();
+
     } catch (error) {
         logger.error(`${EMOJIS.NO_PLATE} Error processing frame:`, error);
+        if (error instanceof Error) {
+            logger.error(`${EMOJIS.NO_PLATE} Stack trace:`, error.stack);
+        }
     }
 }
 
@@ -477,10 +535,12 @@ async function startStreamProcessing(retries = CONFIG.MAX_RETRIES, delay = CONFI
     let attempt = 0;
 
     const processStream = () => {
+        if (isShuttingDown) return;
+
         try {
             fs.accessSync(TEMP_DIR, fs.constants.W_OK);
         } catch (error) {
-            logger.error(`${EMOJIS.NO_PLATE} Directory not writable: ${error}`);
+            logger.error(`${EMOJIS.NO_PLATE} Directory not writable:`, error);
             process.exit(1);
         }
         logger.info(`${EMOJIS.DIR_CHECK} Directory checks passed`);
@@ -494,20 +554,22 @@ async function startStreamProcessing(retries = CONFIG.MAX_RETRIES, delay = CONFI
                 '-fflags nobuffer',
                 '-flags low_delay'
             ])
+            .fps(CONFIG.FPS)
+            .format('image2pipe')
             .outputOptions([
-                '-frames:v 1',
-                '-update 1',
-                '-y'
+                '-vcodec mjpeg',
+                '-pix_fmt yuvj420p'
             ])
             .on('start', (cmdline) => {
-                // Sanitize the FFmpeg command before logging
                 const sanitizedCmd = sanitizeFFmpegCommand(cmdline);
                 logger.info(`${EMOJIS.FFMPEG} FFmpeg command: ${sanitizedCmd}`);
-                logger.info(`${EMOJIS.FRAME_WRITE} Writing frames to: ${path.join(TEMP_DIR, 'frame.jpg')}`);
             })
             .on('error', (err) => {
-                logger.error(`${EMOJIS.NO_PLATE} Error processing RTSP stream: ${err}`);
-
+                if (isShuttingDown) return;
+                logger.error(`${EMOJIS.NO_PLATE} FFmpeg stream error:`, err);
+                if (err instanceof Error) {
+                    logger.error(`${EMOJIS.NO_PLATE} Stack trace:`, err.stack);
+                }
                 if (attempt < retries - 1) {
                     attempt++;
                     logger.info(`${EMOJIS.RTSP_CONNECT} Retrying in ${delay / 1000} seconds...`);
@@ -517,18 +579,25 @@ async function startStreamProcessing(retries = CONFIG.MAX_RETRIES, delay = CONFI
                     process.exit(1);
                 }
             })
-            .output(path.join(TEMP_DIR, 'frame.jpg'))
             .on('end', () => {
-                processFrame(path.join(TEMP_DIR, 'frame.jpg'));
-            });
+                if (isShuttingDown) return;
+                logger.info(`${EMOJIS.FRAME_WRITE} Stream ended unexpectedly, attempting to restart...`);
+                setTimeout(processStream, delay);
+            })
+            .pipe();
 
-        stream.run();
+        stream.on('data', async (buffer) => {
+            await frameQueue.enqueue(buffer);
+        });
     };
 
     processStream();
 }
 
 async function cleanup() {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+
     logger.info(`${EMOJIS.NO_PLATE} Cleaning up...`);
     
     if (worker) {
@@ -538,16 +607,48 @@ async function cleanup() {
     if (fs.existsSync(TEMP_DIR)) {
         await fs.promises.rm(TEMP_DIR, { recursive: true, force: true });
     }
+
+    tf.disposeVariables();
     
     process.exit(0);
 }
 
-process.on('SIGINT', cleanup);
-process.on('SIGTERM', cleanup);
-process.on('uncaughtException', (error) => {
-    logger.error(`${EMOJIS.NO_PLATE} Uncaught exception: ${error}`);
-    cleanup();
+process.on('unhandledRejection', (reason, promise) => {
+    logger.error(`${EMOJIS.NO_PLATE} Unhandled Rejection at:`, promise);
+    if (reason instanceof Error) {
+        logger.error(`${EMOJIS.NO_PLATE} Stack trace:`, reason.stack);
+    } else {
+        logger.error(`${EMOJIS.NO_PLATE} Reason:`, reason);
+    }
+    process.exit(1);
 });
+
+process.on('exit', (code) => {
+    logger.info(`${EMOJIS.NO_PLATE} Process is exiting with code: ${code}`);
+});
+
+process.on('uncaughtException', (error) => {
+    logger.error(`${EMOJIS.NO_PLATE} Uncaught exception:`, error);
+    logger.error(`${EMOJIS.NO_PLATE} Stack trace:`, error.stack);
+    cleanup();
+    process.exit(1);
+});
+
+const HEARTBEAT_INTERVAL = 10000;
+setInterval(() => {
+    logger.info(`${EMOJIS.INIT} Heartbeat: Application is running...`);
+}, HEARTBEAT_INTERVAL);
+
+setInterval(() => {
+    const memInfo = tf.memory();
+    logger.info(
+        `${EMOJIS.DEBUG} TensorFlow Memory Stats:
+        Active Tensors: ${memInfo.numTensors}
+        Data Buffers: ${memInfo.numDataBuffers}
+        Memory Used: ${(memInfo.numBytes / 1024 / 1024).toFixed(2)} MB
+        Memory State: ${memInfo.unreliable ? 'Unreliable' : 'Reliable'}`
+    );
+}, HEARTBEAT_INTERVAL);
 
 function logConfiguration(config: typeof CONFIG) {
     logger.info(`${EMOJIS.INIT} Application configuration:`);
@@ -562,17 +663,12 @@ function logConfiguration(config: typeof CONFIG) {
     logger.info(`${EMOJIS.INIT} Max Vehicle Area: ${config.MAX_VEHICLE_AREA}`);
     logger.info(`${EMOJIS.INIT} Min Person Area: ${config.MIN_PERSON_AREA}`);
     logger.info(`${EMOJIS.INIT} Max Person Area: ${config.MAX_PERSON_AREA}`);
+    logger.info(`${EMOJIS.INIT} Frame Queue Size: ${config.FRAME_QUEUE_SIZE}`);
     logger.info(`${EMOJIS.INIT} ----------------------------------------`);
 }
 
 (async () => {
     await initialise();
-
-    // Log the configuration at startup
     logConfiguration(CONFIG);
-
     startStreamProcessing();
-    
-    // Keep process alive
-    process.stdin.resume();
 })();
