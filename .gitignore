@@ -173,3 +173,10 @@ dist
 
 # Finder (MacOS) folder config
 .DS_Store
+
+# Debug output and logs
+debug_output/
+*.log
+logs/
+app.log
+error.log
