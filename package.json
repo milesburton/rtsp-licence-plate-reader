@@ -1,0 +1,18 @@
+{
+  "name": "rtsp-processor",
+  "module": "index.ts",
+  "type": "module",
+  "devDependencies": {
+    "bun-types": "latest"
+  },
+  "dependencies": {
+    "@tensorflow/tfjs-node": "^4.17.0",
+    "fluent-ffmpeg": "^2.1.2",
+    "sharp": "^0.33.2",
+    "tesseract.js": "^5.0.4",
+    "winston": "^3.11.0"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  }
+}
