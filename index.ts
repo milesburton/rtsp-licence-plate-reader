@@ -90,7 +90,7 @@ const CONFIG = {
     MAX_RETRIES: parseInt(env.MAX_RETRIES || '3'), // Default to 3 retries if not set
     RETRY_DELAY: parseInt(env.RETRY_DELAY || '5000'), // Default to 5000 ms if not set
     DEBUG_MODE: env.DEBUG_MODE === 'true', // Convert to boolean
-    MIN_VEHICLE_AREA: parseInt(env.MIN_VEHICLE_AREA || '10000'), // Default to 10000 if not set
+    MIN_VEHICLE_AREA: parseInt(env.MIN_VEHICLE_AREA || '5000'), // Default to 5000 if not set
     MAX_VEHICLE_AREA: parseInt(env.MAX_VEHICLE_AREA || '120000'), // Default to 120000 if not set
     MIN_PERSON_AREA: parseInt(env.MIN_PERSON_AREA || '5000'), // Default to 5000 if not set
     MAX_PERSON_AREA: parseInt(env.MAX_PERSON_AREA || '50000'), // Default to 50000 if not set
@@ -225,8 +225,8 @@ async function detectVehicles(imagePath: string): Promise<Region[]> {
     try {
         const { data, info } = await sharp(imagePath)
             .grayscale()
-            .blur(2)
-            .threshold(128)
+            .blur(1.0) // Reduced blur radius
+            .threshold(100) // Adjusted threshold
             .raw()
             .toBuffer({ resolveWithObject: true });
 
@@ -258,10 +258,10 @@ async function detectVehicles(imagePath: string): Promise<Region[]> {
                 .toFile(path.join(TEMP_DIR, `detected_vehicles_${Date.now()}.jpg`));
         }
 
-        return regions; // Return the detected regions
+        return regions;
     } catch (error) {
         logger.error(`${EMOJIS.NO_PLATE} Error in vehicle detection:`, error);
-        return []; // Return an empty array in case of error
+        return [];
     }
 }
 
@@ -284,7 +284,7 @@ function findRegions(data: Buffer, width: number, height: number, config: Detect
                     aspectRatio >= config.minAspectRatio && 
                     aspectRatio <= config.maxAspectRatio) {
                     // Calculate confidence as a percentage of the maximum area
-                    bounds.confidence = (area / config.maxArea) * 100; // Assign confidence
+                    bounds.confidence = (area / config.maxArea) * 100; 
                     regions.push(bounds);
                 }
             }
@@ -406,8 +406,10 @@ async function processFrame(framePath: string) {
         // Detect people
         const people = await detectPeople(framePath);
         if (people.length > 0) {
-            logger.info(`${EMOJIS.PEOPLE_DETECT} Detected ${people.length} people in frame with confidences:`, 
-                people.map(p => `Person at (${p.x},${p.y}): ${p.confidence.toFixed(1)}% confidence`).join(', '));
+            const peopleConfidences = people
+                .map(p => `👤 Person at (${p.x}, ${p.y}): ${p.confidence.toFixed(1)}% confidence`)
+                .join('\n');
+            logger.info(`${EMOJIS.PEOPLE_DETECT} Detected ${people.length} people in frame:\n${peopleConfidences}`);
         }
 
         // Process vehicles and plates
@@ -420,8 +422,10 @@ async function processFrame(framePath: string) {
             logger.info(`${EMOJIS.VEHICLE_DETECT} Detected 0 vehicles in frame with 100% confidence`);
         } else {
             // Vehicles detected: log confidences
-            logger.info(`${EMOJIS.VEHICLE_DETECT} Detected ${vehicles.length} vehicles in frame with confidences:`, 
-                vehicles.map(v => `Vehicle at (${v.x},${v.y}): ${v.confidence.toFixed(1)}% confidence`).join(', '));
+            const vehicleConfidences = vehicles
+                .map(v => `🚗 Vehicle at (${v.x}, ${v.y}): ${v.confidence.toFixed(1)}% confidence`)
+                .join('\n');
+            logger.info(`${EMOJIS.VEHICLE_DETECT} Detected ${vehicles.length} vehicles in frame:\n${vehicleConfidences}`);
         }
         
         if (vehicles.length === 0 && people.length === 0) {
@@ -445,7 +449,10 @@ async function processFrame(framePath: string) {
                 
                 const plates = await performOCR(vehiclePath);
                 if (plates.length > 0) {
-                    logger.info(`${EMOJIS.PLATE_DETECT} Detected licence plates:`, plates.map(p => `${p.text} (${(p.confidence * 100).toFixed(1)}% confidence)`));
+                    const plateConfidences = plates
+                        .map(p => `🚘 Detected plate: ${p.text} (${(p.confidence * 100).toFixed(1)}% confidence)`)
+                        .join('\n');
+                    logger.info(`${EMOJIS.PLATE_DETECT} Detected licence plates:\n${plateConfidences}`);
                     plateDetected = true;
                 }
                 
