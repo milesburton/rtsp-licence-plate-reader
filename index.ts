@@ -5,7 +5,7 @@ import * as path from 'path';
 import winston from 'winston';
 import chalk from 'chalk'; // For colorizing console output
 import sharp from 'sharp';
-import { createWorker } from 'tesseract.js';
+import { createWorker, Worker } from 'tesseract.js';
 import * as tf from '@tensorflow/tfjs-node';
 
 // Custom logging format with context-specific emojis and colors
@@ -40,6 +40,19 @@ const customFormat = winston.format.printf(({ level, message, timestamp }) => {
     return `${color(`${emoji} [${timestamp}] ${level.toUpperCase()}:`)} ${message}`;
 });
 
+function sanitizeFFmpegCommand(cmd: string): string {
+    // Regex to match the RTSP URL with credentials
+    const rtspUrlRegex = /(-i\s+)(rtsp:\/\/[^@]+@[^\s]+)/;
+
+    // Replace the credentials with "*****"
+    const sanitizedCmd = cmd.replace(rtspUrlRegex, (match, p1, p2) => {
+        const url = new URL(p2);
+        return `${p1}rtsp://*****:*****@${url.hostname}${url.pathname}`;
+    });
+
+    return sanitizedCmd;
+}
+
 // Configure the logger with the custom format
 const logger = winston.createLogger({
     level: 'info',
@@ -70,23 +83,22 @@ const EMOJIS = {
 };
 
 const CONFIG = {
-    RTSP_URL: env.RTSP_URL,
-    FPS: parseInt(env.FPS || '5'),
-    FRAME_WIDTH: parseInt(env.FRAME_WIDTH || '1280'),
-    FRAME_HEIGHT: parseInt(env.FRAME_HEIGHT || '720'),
-    MAX_RETRIES: parseInt(env.MAX_RETRIES || '3'),
-    RETRY_DELAY: parseInt(env.RETRY_DELAY || '5000'),
-    DEBUG_MODE: env.DEBUG_MODE === 'true',
-    MIN_VEHICLE_AREA: parseInt(env.MIN_VEHICLE_AREA || '10000'),
-    MAX_VEHICLE_AREA: parseInt(env.MAX_VEHICLE_AREA || '80000'),
-    MIN_PERSON_AREA: parseInt(env.MIN_PERSON_AREA || '5000'),
-    MAX_PERSON_AREA: parseInt(env.MAX_PERSON_AREA || '50000'),
+    RTSP_URL: env.RTSP_URL, // RTSP stream URL (excluded from logs for security)
+    FPS: parseInt(env.FPS || '15'), // Default to 15 FPS if not set
+    FRAME_WIDTH: parseInt(env.FRAME_WIDTH || '1920'), // Default to 1920 if not set
+    FRAME_HEIGHT: parseInt(env.FRAME_HEIGHT || '1080'), // Default to 1080 if not set
+    MAX_RETRIES: parseInt(env.MAX_RETRIES || '3'), // Default to 3 retries if not set
+    RETRY_DELAY: parseInt(env.RETRY_DELAY || '5000'), // Default to 5000 ms if not set
+    DEBUG_MODE: env.DEBUG_MODE === 'true', // Convert to boolean
+    MIN_VEHICLE_AREA: parseInt(env.MIN_VEHICLE_AREA || '10000'), // Default to 10000 if not set
+    MAX_VEHICLE_AREA: parseInt(env.MAX_VEHICLE_AREA || '120000'), // Default to 120000 if not set
+    MIN_PERSON_AREA: parseInt(env.MIN_PERSON_AREA || '5000'), // Default to 5000 if not set
+    MAX_PERSON_AREA: parseInt(env.MAX_PERSON_AREA || '50000'), // Default to 50000 if not set
     PLATE_PATTERNS: {
         UK: /^[A-Z]{2}[0-9]{2}[A-Z]{3}$/,
         US: /^[A-Z0-9]{5,8}$/,
         EU: /^[A-Z]{1,2}[0-9]{1,4}[A-Z]{1,2}$/
-    },
-    USE_GPU: env.USE_GPU === 'true'
+    }
 };
 
 if (!CONFIG.RTSP_URL) {
@@ -138,9 +150,9 @@ class FrameQueue {
     }
 }
 
-const frameQueue = new FrameQueue();
+const frameQueue: FrameQueue = new FrameQueue();
 const TEMP_DIR = './debug_output';
-let worker: any;
+let worker: Worker | null = null;
 
 async function initialise() {
     if (!fs.existsSync(TEMP_DIR)) {
@@ -155,6 +167,7 @@ interface Region {
     y: number;
     width: number;
     height: number;
+    confidence: number;
 }
 
 interface DetectionConfig {
@@ -245,16 +258,16 @@ async function detectVehicles(imagePath: string): Promise<Region[]> {
                 .toFile(path.join(TEMP_DIR, `detected_vehicles_${Date.now()}.jpg`));
         }
 
-        return regions;
+        return regions; // Return the detected regions
     } catch (error) {
         logger.error(`${EMOJIS.NO_PLATE} Error in vehicle detection:`, error);
-        return [];
+        return []; // Return an empty array in case of error
     }
 }
 
 function findRegions(data: Buffer, width: number, height: number, config: DetectionConfig): Region[] {
     const visited = new Set<number>();
-    const regions = [];
+    const regions: Region[] = [];
 
     for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
@@ -270,6 +283,8 @@ function findRegions(data: Buffer, width: number, height: number, config: Detect
                     area <= config.maxArea &&
                     aspectRatio >= config.minAspectRatio && 
                     aspectRatio <= config.maxAspectRatio) {
+                    // Calculate confidence as a percentage of the maximum area
+                    bounds.confidence = (area / config.maxArea) * 100; // Assign confidence
                     regions.push(bounds);
                 }
             }
@@ -341,21 +356,33 @@ function getBoundingBox(region: Set<number>, width: number): Region {
         maxY = Math.max(maxY, y);
     }
 
+    const widthBox = maxX - minX;
+    const heightBox = maxY - minY;
+    const area = widthBox * heightBox;
+
     return {
         x: minX,
         y: minY,
-        width: maxX - minX,
-        height: maxY - minY
+        width: widthBox,
+        height: heightBox,
+        confidence: 0 // Placeholder, will be updated in findRegions
     };
 }
 
-async function performOCR(imagePath: string): Promise<Array<{text: string, confidence: number}>> {
+interface OCRWord {
+    text: string;
+    confidence: number;
+}
+
+async function performOCR(imagePath: string): Promise<OCRWord[]> {
     try {
         const { data } = await worker.recognize(imagePath);
-        const words = data.words.map(word => ({
+        
+        // Map words to a strictly typed array
+        const words: OCRWord[] = data.words.map((word: { text: string; confidence: number }) => ({
             text: word.text,
             confidence: word.confidence
-        })).filter(word => {
+        })).filter((word: OCRWord) => {
             return Object.values(CONFIG.PLATE_PATTERNS).some(pattern => 
                 pattern.test(word.text.toUpperCase())
             );
@@ -379,7 +406,8 @@ async function processFrame(framePath: string) {
         // Detect people
         const people = await detectPeople(framePath);
         if (people.length > 0) {
-            logger.info(`${EMOJIS.PEOPLE_DETECT} Detected ${people.length} people in frame`);
+            logger.info(`${EMOJIS.PEOPLE_DETECT} Detected ${people.length} people in frame with confidences:`, 
+                people.map(p => `Person at (${p.x},${p.y}): ${p.confidence.toFixed(1)}% confidence`).join(', '));
         }
 
         // Process vehicles and plates
@@ -387,14 +415,13 @@ async function processFrame(framePath: string) {
         const tensor = tf.node.decodeImage(imageBuffer);
         
         const vehicles = await detectVehicles(framePath);
-
         if (vehicles.length === 0) {
             // No vehicles detected: 100% confidence
             logger.info(`${EMOJIS.VEHICLE_DETECT} Detected 0 vehicles in frame with 100% confidence`);
         } else {
             // Vehicles detected: log confidences
             logger.info(`${EMOJIS.VEHICLE_DETECT} Detected ${vehicles.length} vehicles in frame with confidences:`, 
-                vehicles.map(v => `Vehicle at (${v.x},${v.y}): ${(v.confidence * 100).toFixed(1)}% confidence`));
+                vehicles.map(v => `Vehicle at (${v.x},${v.y}): ${v.confidence.toFixed(1)}% confidence`).join(', '));
         }
         
         if (vehicles.length === 0 && people.length === 0) {
@@ -406,8 +433,13 @@ async function processFrame(framePath: string) {
         let plateDetected = false;
         for (const vehicle of vehicles) {
             try {
-                const vehicleTensor = tf.slice(tensor, [vehicle.y, vehicle.x, 0], [vehicle.height, vehicle.width, 3]);
-                const vehicleBuffer = await tf.node.encodePng(vehicleTensor);
+                let vehicleTensor = tf.slice(tensor, [vehicle.y, vehicle.x, 0], [vehicle.height, vehicle.width, 3]);
+
+                // Ensure the tensor is 3D (height, width, channels)
+                vehicleTensor = vehicleTensor.squeeze(); // Remove extra dimensions (e.g., batch dimension)
+
+                // Cast to Tensor3D to satisfy TypeScript
+                const vehicleBuffer = await tf.node.encodePng(vehicleTensor as tf.Tensor3D);
                 const vehiclePath = path.join(TEMP_DIR, `vehicle_${Date.now()}.jpg`);
                 await fs.promises.writeFile(vehiclePath, vehicleBuffer);
                 
@@ -461,7 +493,9 @@ async function startStreamProcessing(retries = CONFIG.MAX_RETRIES, delay = CONFI
                 '-y'
             ])
             .on('start', (cmdline) => {
-                logger.info(`${EMOJIS.FFMPEG} FFmpeg command: ${cmdline}`);
+                // Sanitize the FFmpeg command before logging
+                const sanitizedCmd = sanitizeFFmpegCommand(cmdline);
+                logger.info(`${EMOJIS.FFMPEG} FFmpeg command: ${sanitizedCmd}`);
                 logger.info(`${EMOJIS.FRAME_WRITE} Writing frames to: ${path.join(TEMP_DIR, 'frame.jpg')}`);
             })
             .on('error', (err) => {
@@ -508,8 +542,28 @@ process.on('uncaughtException', (error) => {
     cleanup();
 });
 
+function logConfiguration(config: typeof CONFIG) {
+    logger.info(`${EMOJIS.INIT} Application configuration:`);
+    logger.info(`${EMOJIS.INIT} ----------------------------------------`);
+    logger.info(`${EMOJIS.INIT} FPS: ${config.FPS}`);
+    logger.info(`${EMOJIS.INIT} Frame Width: ${config.FRAME_WIDTH}`);
+    logger.info(`${EMOJIS.INIT} Frame Height: ${config.FRAME_HEIGHT}`);
+    logger.info(`${EMOJIS.INIT} Max Retries: ${config.MAX_RETRIES}`);
+    logger.info(`${EMOJIS.INIT} Retry Delay: ${config.RETRY_DELAY} ms`);
+    logger.info(`${EMOJIS.INIT} Debug Mode: ${config.DEBUG_MODE ? 'Enabled' : 'Disabled'}`);
+    logger.info(`${EMOJIS.INIT} Min Vehicle Area: ${config.MIN_VEHICLE_AREA}`);
+    logger.info(`${EMOJIS.INIT} Max Vehicle Area: ${config.MAX_VEHICLE_AREA}`);
+    logger.info(`${EMOJIS.INIT} Min Person Area: ${config.MIN_PERSON_AREA}`);
+    logger.info(`${EMOJIS.INIT} Max Person Area: ${config.MAX_PERSON_AREA}`);
+    logger.info(`${EMOJIS.INIT} ----------------------------------------`);
+}
+
 (async () => {
     await initialise();
+
+    // Log the configuration at startup
+    logConfiguration(CONFIG);
+
     startStreamProcessing();
     
     // Keep process alive
