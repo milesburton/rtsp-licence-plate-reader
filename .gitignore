@@ -180,3 +180,6 @@ debug_output/
 logs/
 app.log
 error.log
+
+# Misc
+setup.sh

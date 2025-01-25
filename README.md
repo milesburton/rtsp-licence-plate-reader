@@ -1,4 +1,6 @@
-# 🎥 RTSP Licence Plate Reader
+⚠️ This is an experimental application
+
+# 🎥 RTSP Licence Plate Reader 
 
 A real-time licence plate detection system that processes RTSP video streams to identify vehicles and their licence plates. This application was developed with assistance from Anthropic's Claude AI.
 

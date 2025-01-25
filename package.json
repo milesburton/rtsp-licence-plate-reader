@@ -1,18 +1,31 @@
 {
   "name": "rtsp-processor",
-  "module": "index.ts",
+  "version": "1.0.0",
+  "description": "A TypeScript application for processing RTSP streams using Bun.",
+  "main": "src/index.ts",
   "type": "module",
-  "devDependencies": {
-    "bun-types": "latest"
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "build": "tsc",
+    "setup": "bash setup.sh",
+    "test": "vitest",
+    "test:watch": "vitest watch",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@tensorflow/tfjs-node": "^4.17.0",
     "fluent-ffmpeg": "^2.1.2",
-    "sharp": "^0.33.2",
+    "sharp": "^0.33.5",
     "tesseract.js": "^5.0.4",
-    "winston": "^3.11.0"
+    "winston": "^3.17.0"
   },
-  "peerDependencies": {
-    "typescript": "^5.0.0"
-  }
+  "devDependencies": {
+    "@types/node": "^22.10.10",
+    "bun-types": "latest",
+    "typescript": "^5.0.0",
+    "vitest": "^3.0.4"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
 }
