@@ -10,10 +10,12 @@
   },
   "dependencies": {
     "@tensorflow/tfjs-node": "^4.17.0",
+    "chalk": "^5.4.1",
     "fluent-ffmpeg": "^2.1.2",
     "sharp": "^0.33.2",
     "tesseract.js": "^5.0.4",
-    "winston": "^3.11.0"
+    "winston": "^3.11.0",
+    "winston-console-format": "^1.0.8"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"

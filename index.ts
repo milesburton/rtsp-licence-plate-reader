@@ -3,23 +3,71 @@ import ffmpeg from 'fluent-ffmpeg';
 import * as fs from 'fs';
 import * as path from 'path';
 import winston from 'winston';
+import chalk from 'chalk'; // For colorizing console output
 import sharp from 'sharp';
 import { createWorker } from 'tesseract.js';
 import * as tf from '@tensorflow/tfjs-node';
 
+// Custom logging format with context-specific emojis and colors
+const customFormat = winston.format.printf(({ level, message, timestamp }) => {
+    let emoji = '';
+    let color = chalk.white;
+
+    // Map log levels to emojis and colors
+    switch (level) {
+        case 'info':
+            emoji = 'ℹ️';
+            color = chalk.blue;
+            break;
+        case 'warn':
+            emoji = '⚠️';
+            color = chalk.yellow;
+            break;
+        case 'error':
+            emoji = '❌';
+            color = chalk.red;
+            break;
+        case 'debug':
+            emoji = '🐛';
+            color = chalk.green;
+            break;
+        default:
+            emoji = '🔍';
+            break;
+    }
+
+    // Format the log message
+    return `${color(`${emoji} [${timestamp}] ${level.toUpperCase()}:`)} ${message}`;
+});
+
+// Configure the logger with the custom format
 const logger = winston.createLogger({
     level: 'info',
     format: winston.format.combine(
-        winston.format.timestamp(),
-        winston.format.errors({ stack: true }),
-        winston.format.json()
+        winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }), // Add timestamp
+        winston.format.errors({ stack: true }), // Include error stacks
+        customFormat // Use the custom format
     ),
     transports: [
-        new winston.transports.Console(),
-        new winston.transports.File({ filename: 'error.log', level: 'error' }),
-        new winston.transports.File({ filename: 'app.log' })
+        new winston.transports.Console(), // Log to console
+        new winston.transports.File({ filename: 'error.log', level: 'error' }), // Log errors to a file
+        new winston.transports.File({ filename: 'app.log' }) // Log everything to a file
     ],
 });
+
+// Context-specific emojis
+const EMOJIS = {
+    INIT: '🚀', // System initialisation
+    DIR_CHECK: '📂', // Directory checks
+    RTSP_CONNECT: '📡', // RTSP connection attempts
+    FFMPEG: '🎥', // FFmpeg commands
+    FRAME_WRITE: '🖼️', // Writing frames
+    FRAME_PROCESS: '🔍', // Processing frames
+    PEOPLE_DETECT: '👤', // Detecting people
+    VEHICLE_DETECT: '🚗', // Detecting vehicles
+    PLATE_DETECT: '🚘', // Detecting licence plates
+    NO_PLATE: '🚫', // No licence plates detected
+};
 
 const CONFIG = {
     RTSP_URL: env.RTSP_URL,
@@ -42,7 +90,7 @@ const CONFIG = {
 };
 
 if (!CONFIG.RTSP_URL) {
-    logger.error('RTSP_URL environment variable is not set.');
+    logger.error(`${EMOJIS.NO_PLATE} RTSP_URL environment variable is not set.`);
     process.exit(1);
 }
 
@@ -83,7 +131,7 @@ class FrameQueue {
                 await fs.promises.unlink(framePath);
             }
         } catch (error) {
-            logger.error('Error processing frame:', error);
+            logger.error(`${EMOJIS.NO_PLATE} Error processing frame:`, error);
         }
 
         setImmediate(() => this.processQueue());
@@ -99,7 +147,7 @@ async function initialise() {
         fs.mkdirSync(TEMP_DIR, { recursive: true });
     }
     worker = await createWorker('eng');
-    logger.info('System initialised with OCR capabilities.');
+    logger.info(`${EMOJIS.INIT} System initialised with OCR capabilities.`);
 }
 
 interface Region {
@@ -155,7 +203,7 @@ async function detectPeople(imagePath: string): Promise<Region[]> {
 
         return regions;
     } catch (error) {
-        logger.error('Error in person detection:', error);
+        logger.error(`${EMOJIS.NO_PLATE} Error in person detection:`, error);
         return [];
     }
 }
@@ -199,7 +247,7 @@ async function detectVehicles(imagePath: string): Promise<Region[]> {
 
         return regions;
     } catch (error) {
-        logger.error('Error in vehicle detection:', error);
+        logger.error(`${EMOJIS.NO_PLATE} Error in vehicle detection:`, error);
         return [];
     }
 }
@@ -315,23 +363,23 @@ async function performOCR(imagePath: string): Promise<Array<{text: string, confi
         
         return words;
     } catch (error) {
-        logger.error('Error performing OCR:', error);
+        logger.error(`${EMOJIS.NO_PLATE} Error performing OCR:`, error);
         return [];
     }
 }
 
 async function processFrame(framePath: string) {
     try {
-        logger.info(`Processing frame: ${framePath}`);
+        logger.info(`${EMOJIS.FRAME_PROCESS} Processing frame: ${framePath}`);
         if (!fs.existsSync(framePath)) {
-            logger.error('Frame file does not exist');
+            logger.error(`${EMOJIS.NO_PLATE} Frame file does not exist`);
             return;
         }
 
         // Detect people
         const people = await detectPeople(framePath);
         if (people.length > 0) {
-            logger.info(`Detected ${people.length} people in frame`);
+            logger.info(`${EMOJIS.PEOPLE_DETECT} Detected ${people.length} people in frame`);
         }
 
         // Process vehicles and plates
@@ -339,11 +387,18 @@ async function processFrame(framePath: string) {
         const tensor = tf.node.decodeImage(imageBuffer);
         
         const vehicles = await detectVehicles(framePath);
-        logger.info(`Detected ${vehicles.length} vehicles in frame with confidences:`, 
-            vehicles.map(v => `Vehicle at (${v.x},${v.y}): ${(v.confidence * 100).toFixed(1)}% confidence`));
+
+        if (vehicles.length === 0) {
+            // No vehicles detected: 100% confidence
+            logger.info(`${EMOJIS.VEHICLE_DETECT} Detected 0 vehicles in frame with 100% confidence`);
+        } else {
+            // Vehicles detected: log confidences
+            logger.info(`${EMOJIS.VEHICLE_DETECT} Detected ${vehicles.length} vehicles in frame with confidences:`, 
+                vehicles.map(v => `Vehicle at (${v.x},${v.y}): ${(v.confidence * 100).toFixed(1)}% confidence`));
+        }
         
         if (vehicles.length === 0 && people.length === 0) {
-            logger.info('No objects detected in this frame');
+            logger.info(`${EMOJIS.NO_PLATE} No objects detected in this frame`);
             tensor.dispose();
             return;
         }
@@ -358,24 +413,24 @@ async function processFrame(framePath: string) {
                 
                 const plates = await performOCR(vehiclePath);
                 if (plates.length > 0) {
-                    logger.info('Detected licence plates:', plates.map(p => `${p.text} (${(p.confidence * 100).toFixed(1)}% confidence)`));
+                    logger.info(`${EMOJIS.PLATE_DETECT} Detected licence plates:`, plates.map(p => `${p.text} (${(p.confidence * 100).toFixed(1)}% confidence)`));
                     plateDetected = true;
                 }
                 
                 await fs.promises.unlink(vehiclePath);
                 vehicleTensor.dispose();
             } catch (error) {
-                logger.error('Error processing vehicle region:', error);
+                logger.error(`${EMOJIS.NO_PLATE} Error processing vehicle region:`, error);
             }
         }
         
         if (!plateDetected && vehicles.length > 0) {
-            logger.info('No licence plates detected in any vehicle regions');
+            logger.info(`${EMOJIS.NO_PLATE} No licence plates detected in any vehicle regions`);
         }
         
         tensor.dispose();
     } catch (error) {
-        logger.error('Error processing frame:', error);
+        logger.error(`${EMOJIS.NO_PLATE} Error processing frame:`, error);
     }
 }
 
@@ -386,12 +441,12 @@ async function startStreamProcessing(retries = CONFIG.MAX_RETRIES, delay = CONFI
         try {
             fs.accessSync(TEMP_DIR, fs.constants.W_OK);
         } catch (error) {
-            logger.error(`Directory not writable: ${error}`);
+            logger.error(`${EMOJIS.NO_PLATE} Directory not writable: ${error}`);
             process.exit(1);
         }
-        logger.info('Directory checks passed');
+        logger.info(`${EMOJIS.DIR_CHECK} Directory checks passed`);
 
-        logger.info(`Attempting to connect to RTSP stream (Attempt ${attempt + 1}/${retries})...`);
+        logger.info(`${EMOJIS.RTSP_CONNECT} Attempting to connect to RTSP stream (Attempt ${attempt + 1}/${retries})...`);
         
         const stream = ffmpeg(CONFIG.RTSP_URL)
             .inputOptions([
@@ -406,18 +461,18 @@ async function startStreamProcessing(retries = CONFIG.MAX_RETRIES, delay = CONFI
                 '-y'
             ])
             .on('start', (cmdline) => {
-                logger.info('FFmpeg command:', cmdline);
-                logger.info('Writing frames to:', path.join(TEMP_DIR, 'frame.jpg'));
+                logger.info(`${EMOJIS.FFMPEG} FFmpeg command: ${cmdline}`);
+                logger.info(`${EMOJIS.FRAME_WRITE} Writing frames to: ${path.join(TEMP_DIR, 'frame.jpg')}`);
             })
             .on('error', (err) => {
-                logger.error('Error processing RTSP stream:', err);
+                logger.error(`${EMOJIS.NO_PLATE} Error processing RTSP stream: ${err}`);
 
                 if (attempt < retries - 1) {
                     attempt++;
-                    logger.info(`Retrying in ${delay / 1000} seconds...`);
+                    logger.info(`${EMOJIS.RTSP_CONNECT} Retrying in ${delay / 1000} seconds...`);
                     setTimeout(processStream, delay);
                 } else {
-                    logger.error('Max retries reached. Exiting...');
+                    logger.error(`${EMOJIS.NO_PLATE} Max retries reached. Exiting...`);
                     process.exit(1);
                 }
             })
@@ -433,7 +488,7 @@ async function startStreamProcessing(retries = CONFIG.MAX_RETRIES, delay = CONFI
 }
 
 async function cleanup() {
-    logger.info('Cleaning up...');
+    logger.info(`${EMOJIS.NO_PLATE} Cleaning up...`);
     
     if (worker) {
         await worker.terminate();
@@ -449,7 +504,7 @@ async function cleanup() {
 process.on('SIGINT', cleanup);
 process.on('SIGTERM', cleanup);
 process.on('uncaughtException', (error) => {
-    logger.error('Uncaught exception:', error);
+    logger.error(`${EMOJIS.NO_PLATE} Uncaught exception: ${error}`);
     cleanup();
 });
 
