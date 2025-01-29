@@ -70,22 +70,24 @@ export function startStreamProcessing(retries = CONFIG.MAX_RETRIES, delay = CONF
         logger.info(`${EMOJIS.RTSP_CONNECT} Attempting to connect to RTSP stream (Attempt ${attempt + 1}/${retries})...`);
 
         const stream = ffmpeg(CONFIG.RTSP_URL)
-            .inputOptions([
-                '-rtsp_transport tcp',
-                '-stimeout 5000000',
-                '-fflags nobuffer',
-                '-flags low_delay'
-            ])
-            .fps(CONFIG.FPS)
-            .format('image2pipe')
-            .outputOptions([
-                '-vcodec mjpeg',
-                '-pix_fmt yuvj420p'
-            ])
-            .on('start', (cmdline) => {
-                const sanitizedCmd = sanitizeFFmpegCommand(cmdline);
-                logger.info(`${EMOJIS.FFMPEG} FFmpeg command: ${sanitizedCmd}`);
-            })
+        .inputOptions([
+            '-rtsp_transport tcp',
+            '-stimeout 5000000',
+            '-re',
+            '-fflags nobuffer'
+        ])
+        .fps(CONFIG.FPS)
+        .size(`${CONFIG.FRAME_WIDTH}x${CONFIG.FRAME_HEIGHT}`)
+        .format('image2pipe')
+        .outputOptions([
+            '-vcodec mjpeg',
+            '-q:v 2',
+            '-pix_fmt yuvj420p'
+        ])
+        .on('start', (cmdline) => {
+            const sanitizedCmd = sanitizeFFmpegCommand(cmdline);
+            logger.info(`${EMOJIS.FFMPEG} FFmpeg command: ${sanitizedCmd}`);
+        })
             .on('error', (err) => {
                 if (isShuttingDown) return;
                 logger.error(`${EMOJIS.NO_PLATE} FFmpeg stream error:`, err);
@@ -108,8 +110,23 @@ export function startStreamProcessing(retries = CONFIG.MAX_RETRIES, delay = CONF
             })
             .pipe();
 
-        stream.on('data', async (buffer) => {
-            await frameQueue.enqueue(buffer);
+        // Handle frame buffering
+        let frameBuffer = Buffer.from([]);
+        const frameSize = CONFIG.FRAME_WIDTH * CONFIG.FRAME_HEIGHT * 3; // 3 bytes per pixel (RGB)
+
+        stream.on('data', async (chunk) => {
+            frameBuffer = Buffer.concat([frameBuffer, chunk]);
+
+            // Process complete frames
+            while (frameBuffer.length >= frameSize) {
+                const frameData = frameBuffer.slice(0, frameSize);
+                frameBuffer = frameBuffer.slice(frameSize);
+                await frameQueue.enqueue(frameData);
+            }
+        });
+
+        stream.on('error', (error) => {
+            logger.error(`${EMOJIS.NO_PLATE} Stream error:`, error);
         });
     };
 

@@ -1,6 +1,7 @@
 import * as tf from '@tensorflow/tfjs-node';
 import * as fs from 'fs';
 import * as path from 'path';
+import sharp from 'sharp';
 import { logger } from '../utils/logger';
 import { CONFIG, TEMP_DIR } from '../config';
 import { detectPeople, detectVehicles, performOCR } from './detection';
@@ -8,13 +9,19 @@ import { EMOJIS } from '../utils/logger';
 
 export async function processFrame(buffer: Buffer) {
     try {
-        logger.info(`${EMOJIS.FRAME_PROCESS} Processing frame`);
+        logger.info(`${EMOJIS.FRAME_PROCESS} Processing frame (size: ${buffer.length} bytes)`);
 
-        const tensor = tf.node.decodeImage(buffer) as tf.Tensor3D;
+        // Convert incoming buffer to compatible JPEG format
+        const processedBuffer = await sharp(buffer)
+            .jpeg()
+            .toBuffer();
+
+        // Decode the processed image
+        const tensor = tf.node.decodeJpeg(buffer) as tf.Tensor3D;
         logger.debug(`${EMOJIS.DEBUG} Created tensor with shape: ${tensor.shape} and dtype: ${tensor.dtype}`);
 
         const tempFramePath = path.join(TEMP_DIR, `frame_${Date.now()}.jpg`);
-        await fs.promises.writeFile(tempFramePath, buffer);
+        await fs.promises.writeFile(tempFramePath, processedBuffer);
         logger.debug(`${EMOJIS.DEBUG} Frame written to ${tempFramePath}`);
 
         const people = await detectPeople(tempFramePath);
@@ -63,7 +70,6 @@ export async function processFrame(buffer: Buffer) {
         await fs.promises.unlink(tempFramePath);
         logger.debug(`${EMOJIS.DEBUG} Frame file deleted: ${tempFramePath}`);
         tensor.dispose();
-
     } catch (error) {
         logger.error(`${EMOJIS.NO_PLATE} Error processing frame:`, error);
         if (error instanceof Error) {
