@@ -7,7 +7,7 @@ import * as path from 'path';
 import winston from 'winston';
 import chalk from 'chalk';
 import sharp from 'sharp';
-import { createWorker, Worker } from 'tesseract.js';
+import { createWorker, type Worker } from 'tesseract.js';
 import * as tf from '@tensorflow/tfjs-node';
 import * as cocoSsd from '@tensorflow-models/coco-ssd';
 
