@@ -17,7 +17,10 @@ export async function processFrame(buffer: Buffer) {
             .toBuffer();
 
         // Decode the processed image
-        const tensor = tf.node.decodeJpeg(buffer) as tf.Tensor3D;
+        const tensor = tf.tensor3d(
+            new Uint8Array(buffer), 
+            [CONFIG.FRAME_HEIGHT, CONFIG.FRAME_WIDTH, 3]
+        );
         logger.debug(`${EMOJIS.DEBUG} Created tensor with shape: ${tensor.shape} and dtype: ${tensor.dtype}`);
 
         const tempFramePath = path.join(TEMP_DIR, `frame_${Date.now()}.jpg`);
@@ -75,5 +78,9 @@ export async function processFrame(buffer: Buffer) {
         if (error instanceof Error) {
             logger.error(`${EMOJIS.NO_PLATE} Stack trace:`, error.stack);
         }
+    }
+    finally {
+        // Clean up tensors 
+        tf.disposeVariables();
     }
 }
