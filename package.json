@@ -6,9 +6,11 @@
     "start": "bun run index.ts"
   },
   "devDependencies": {
+    "@types/fluent-ffmpeg": "^2.1.27",
     "bun-types": "latest"
   },
   "dependencies": {
+    "@tensorflow-models/coco-ssd": "^2.2.3",
     "@tensorflow/tfjs-node": "^4.17.0",
     "chalk": "^5.4.1",
     "fluent-ffmpeg": "^2.1.2",
