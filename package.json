@@ -1,23 +1,28 @@
 {
-  "name": "rtsp-processor",
-  "module": "index.ts",
+  "name": "vehicle-detection-system",
+  "version": "1.0.0",
+  "description": "Vehicle and license plate detection system using RTSP streams",
+  "main": "src/index.ts",
   "type": "module",
   "scripts": {
-    "start": "bun run index.ts"
-  },
-  "devDependencies": {
-    "bun-types": "latest"
+    "start": "bun run src/index.ts",
+    "dev": "bun --watch src/index.ts",
+    "build": "tsc",
+    "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@tensorflow-models/coco-ssd": "^2.2.2",
     "@tensorflow/tfjs-node": "^4.17.0",
-    "chalk": "^5.4.1",
+    "chalk": "^5.3.0",
     "fluent-ffmpeg": "^2.1.2",
     "sharp": "^0.33.2",
     "tesseract.js": "^5.0.4",
-    "winston": "^3.11.0",
-    "winston-console-format": "^1.0.8"
+    "winston": "^3.11.0"
   },
-  "peerDependencies": {
-    "typescript": "^5.0.0"
+  "devDependencies": {
+    "@types/fluent-ffmpeg": "^2.1.24",
+    "@types/node": "^20.11.20",
+    "bun-types": "latest",
+    "typescript": "^5.3.3"
   }
 }
